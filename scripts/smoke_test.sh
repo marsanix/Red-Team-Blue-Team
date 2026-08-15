@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Smoke test end-to-end (berjalan di server Ubuntu maupun Git Bash Windows).
+# Smoke test end-to-end (berjalan di Git Bash Windows maupun shell Linux).
 #
 #   bash scripts/smoke_test.sh [BASE_URL]
-#   contoh: bash scripts/smoke_test.sh http://localhost
+#   contoh: bash scripts/smoke_test.sh http://localhost:8081
+#           bash scripts/smoke_test.sh http://<IP-tailnet-nginx>
 set -uo pipefail
 
 BASE="${1:-http://localhost}"

@@ -35,15 +35,19 @@ Skenario aplikasi: `register` → `login` → `profile` → `customers`
 
 ```
 TAILNET 100.64.0.0/10
-  Red/Blue Team --> host:80
-                     nginx 10.10.0.10 (dmz)   <- satu-satunya yang di-publish
+  Red/Blue Team --> http://<IP-tailnet-nginx>/   <- web server = NODE TAILNET
+                     nginx 10.10.0.10 (dmz) + tailscale0 (tailnet)
                        | proxy_pass
                      flask 10.10.0.11 (dmz) / 10.10.2.11 (internal)
                        | SQL
                      mysql 10.10.2.12 (internal, TIDAK di-publish)
 ```
 
-## Quickstart (Docker Desktop Windows / server Ubuntu)
+`tailscaled` berjalan di dalam container nginx (lihat `nginx/Dockerfile`).
+Attacker menyerang langsung alamat tailnet web server - dapatkan via
+`docker exec nginx tailscale ip -4`. Port host hanya untuk dev & fallback.
+
+## Quickstart (host Docker = mesin Blue Team)
 
 ```bash
 cp .env.example .env          # sudah tersedia .env untuk dev
@@ -51,7 +55,13 @@ docker compose up -d --build
 docker compose ps             # pastikan semua "healthy"
 ```
 
-**Endpoint utama** (`http://localhost` di dev, atau IP tailnet server):
+Host Docker adalah salah satu mesin Blue Team. Web server (container nginx)
+otomatis join tailnet bila `TS_AUTHKEY` diisi di `.env`. Red Team & anggota
+Blue Team lain join ke tailnet yang sama, lalu mengakses
+`http://<IP-tailnet-nginx>` (dapatkan via `docker exec nginx tailscale ip -4`).
+
+**Endpoint utama** (`http://localhost:8081` di dev, atau
+`http://<IP-tailnet-nginx>` bila tailscale aktif):
 
 | Method | Path | Keterangan |
 |--------|------|------------|
@@ -67,9 +77,10 @@ docker compose ps             # pastikan semua "healthy"
 
 ## Troubleshooting
 
-- **Port 80 sudah dipakai project lain / Windows** (`Bind for 0.0.0.0:80 failed`):
-  tambahkan `HTTP_PORT=8080` di `.env` lalu `docker compose up -d`. Di server
-  Ubuntu port 80 default dipakai (tailscale mengarah ke port 80).
+- **Port 80/8080 sudah dipakai project lain di mesin dev** (`Bind for
+  0.0.0.0:80 failed`): `.env` sudah memakai `HTTP_PORT=8081` untuk dev
+  (`docker compose up -d`). Port host hanya fallback - jalur utama serangan
+  via tailnet (`100.x.y.z:80`) tidak bergantung pada port host.
 - **Ubah subnet 10.10.0.0/24 / 10.10.2.0/24** bila bentrok dengan network
   Docker lain di mesin (terjadi jika ada project lain memakai range yang sama).
 - **Reset database**: `docker compose down -v && docker compose up -d` (volume
@@ -78,9 +89,13 @@ docker compose ps             # pastikan semua "healthy"
 ## Tes cepat
 
 ```bash
-bash scripts/smoke_test.sh http://localhost          # register→login→bypass→rate limit
-python scripts/bypass_jwt.py --none --target http://localhost
-python scripts/bypass_jwt.py --hs256 --target http://localhost
+# dev lokal (tanpa tailscale): port host 8081
+bash scripts/smoke_test.sh http://localhost:8081
+python scripts/bypass_jwt.py --none --target http://localhost:8081
+python scripts/bypass_jwt.py --hs256 --target http://localhost:8081
+
+# dengan tailscale aktif (dari mana pun di tailnet): target = IP tailnet web server
+# bash scripts/smoke_test.sh http://<IP-tailnet-nginx>
 ```
 
 Catatan: di Windows gunakan `python` (atau `py`); pastikan Git Bash / bash
@@ -88,12 +103,16 @@ tersedia untuk `smoke_test.sh`.
 
 ## Urutan kerja untuk ujian
 
-1. **Fase 1**: `docker compose up -d --build` + terapkan firewall
-   (`infrastructure/firewall/firewall.sh` di server Ubuntu).
+1. **Fase 1**: `docker compose up -d --build` di mesin Blue Team (host
+   Docker). Firewall aktif **di dalam container nginx** (iptables pada
+   `tailscale0` + `limit_req`); `infrastructure/firewall/firewall.sh` hanya
+   opsional bila host OS Linux/Ubuntu.
 2. **Fase 2 (Red Team)**: ikuti `docs/RECON.md` → `docs/RED_TEAM.md`
    (Burp Suite Repeater/Intruder; tanpa automated scanner).
-3. **Fase 3 (Blue Team)**: mulai `tshark -w red_team.pcap` sebelum serangan,
-   analisis BPF (`docs/BLUE_TEAM.md`), blokir IP, lalu patch kode.
+3. **Fase 3 (Blue Team)**: mulai capture **di dalam container nginx**
+   (`docker exec -it nginx sh -c 'tshark -i tailscale0 -f "tcp port 80" -w /tmp/red_team.pcap'`)
+   sebelum serangan, analisis BPF (`docs/BLUE_TEAM.md`), blokir IP, lalu
+   patch kode.
 
 ## Membuat laporan PDF
 

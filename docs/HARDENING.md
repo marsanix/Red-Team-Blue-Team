@@ -10,9 +10,14 @@ semuanya?"* dan menyediakan checklist pengamanan menyeluruh.
 
 | Service    | Image yang dipakai    | Ukuran ± | Alternatif                      | Alasan                                                                                                      |
 | ---------- | --------------------- | --------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Web server | `nginx:1.27-alpine` | ~ 45 MB   | `nginx:1.27` (~100 MB)        | Alpine = image resmi, kecil, sudah mencukupi fitur proxy/rate-limit yang dipakai.                           |
+| Web server | `nginx:1.27-alpine` + tailscale, tshark, iptables, iproute2 (`nginx/Dockerfile`) | ~ 90 MB | `nginx:1.27` (~100 MB); atau host OS Linux + firewall host (UFW/DOCKER-USER) terpisah | **Alpine = image Linux terkecil yang memenuhi semua kebutuhan**: nginx + tailscale + forensik (tshark) + firewall (iptables) dalam SATU container. Dengan begitu firewall & capture bisa diterapkan **di dalam container** (diuji berhasil), tanpa image terpisah. |
 | Backend    | `python:3.12-slim`  | ~ 125 MB  | `python:3.12-alpine` (~50 MB) | **slim dipilih, bukan alpine** (penjelasan di bawah).                                                 |
 | Database   | `mysql:8.4`         | ~ 600 MB  | `mariadb:11` (~400 MB)        | MySQL sesuai syarat soal; tidak ada varian alpine resmi untuk MySQL. MariaDB lebih ringan tapi bukan MySQL. |
+
+> Catatan: karena web server (container nginx) memakai **iptables di dalam
+> container**, penerapan firewall untuk skenario ujian tidak bergantung pada
+> OS host. Host bisa Windows/Linux; host OS Linux tetap bisa menambah lapis
+> `ufw`/`DOCKER-USER` (opsional).
 
 ### Mengapa backend memakai `slim`, bukan `alpine`?
 
@@ -32,10 +37,11 @@ selalu yang terkecil** - ada trade-off antara ukuran dan *determinisme*:
 
 **Kesimpulan yang dilaporkan:** gunakan image **sekecil mungkin yang tetap
 menjamin instalasi deterministik**. Kombinasi pilihan: `nginx:1.27-alpine`
-(web, aman alpine) + `python:3.12-slim` (backend, wajib glibc untuk wheel
-`cryptography`) + `mysql:8.4` (wajib MySQL; tidak ada varian alpine). Bila
-benar-benar ingin mengecilkan backend, pakai `python:3.12-alpine` hanya
-setelah menguji `pip install` lolos.
+(web server - sudah merupakan Linux terkecil yang memenuhi semua kebutuhan
+termasuk firewall & forensik di dalam container) + `python:3.12-slim`
+(backend, wajib glibc untuk wheel `cryptography`) + `mysql:8.4` (wajib MySQL;
+tidak ada varian alpine). Bila benar-benar ingin mengecilkan backend, pakai
+`python:3.12-alpine` hanya setelah menguji `pip install` lolos.
 
 ---
 
@@ -57,8 +63,16 @@ setelah menguji `pip install` lolos.
 - [ ] IP statis per service agar aturan firewall & diagram topologi jelas.
 - [ ] Docker `restart: unless-stopped` + healthcheck tiap service.
 
-### 2.3. Firewall (host Ubuntu)
+### 2.3. Firewall (di dalam container + host opsional)
 
+**Utama (skenario ini - jalan di host OS apa pun):**
+- [ ] **iptables di dalam container nginx** pada interface `tailscale0`:
+  blokir IP attacker (`-s <ip-attacker> -j DROP`) dan rate-limit
+  `hashlimit` 10/detik (lihat `docs/LAPORAN.md` §4.2 Lampiran).
+- [ ] nginx `limit_req` 10 r/s (burst 20, `nodelay`) di `nginx/nginx.conf`.
+- [ ] Verifikasi: `docker exec nginx iptables -L INPUT -n -v`.
+
+**Opsional (hanya bila host OS Linux/Ubuntu):**
 - [ ] UFW: `default deny incoming`; buka SSH & port 80/443 **hanya** dari
   subnet Tailscale `100.64.0.0/10`.
 - [ ] iptables **DOCKER-USER**: ESTABLISHED diizinkan, subnet Tailscale

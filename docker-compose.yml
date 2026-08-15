@@ -10,7 +10,7 @@
 #
 #   IP statis dikonfigurasi via `ipv4_address` + subnet eksplisit.
 # ============================================================
-name: uas-kelompok5
+name: uas-kelompok5dan9
 
 services:
   nginx:
@@ -20,8 +20,9 @@ services:
     build: ./nginx
     restart: unless-stopped
     ports:
-      # Port host untuk akses DEV / fallback. Default 80 (server Ubuntu);
-      # override via HTTP_PORT di .env bila bentrok di mesin dev (mis. 8081).
+      # Port host untuk akses DEV / fallback (jalur serangan utama via
+      # tailnet tidak lewat port ini). Default 80; override via HTTP_PORT di
+      # .env bila bentrok di mesin dev (mis. 8081).
       - "${HTTP_PORT:-80}:80"
     env_file:
       - .env        # TS_AUTHKEY, TS_HOSTNAME (tailscale) untuk container ini

@@ -85,6 +85,7 @@ tshark -r red_team.pcap -q -z http,req,tree       # request HTTP
 ```
 
 **Anomali yang diharapkan saat serangan `alg=none`:**
+
 1. Banyak request `POST /api/login` / `POST /api/register` dari satu IP
    (Red Team menyiapkan akun).
 2. Request `GET /api/customers` dengan `Authorization: Bearer <token>` yang
@@ -101,6 +102,7 @@ tshark -r red_team.pcap -q -z http,req,tree       # request HTTP
 
 > Ini menuntut pemahaman **struktur JWT** (header.payload.signature), bukan
 > sekadar membaca baris log. Jelaskan di laporan: *signature kosong
+>
 > + role=admin = token palsu yang diterima server*.
 
 ### 3.3. Buat timeline serangan dari PCAP

@@ -109,15 +109,22 @@ dapat membukanya setelah memanipulasi token.
                     └────────────────────────────────┘
 ```
 
+- **Host Docker = mesin Blue Team** (bukan server Ubuntu terpisah). Docker
+  Desktop/Engine berjalan di salah satu laptop anggota Blue Team; seluruh
+  stack (`nginx`, `flask`, `mysql`) hidup sebagai container di mesin itu.
 - **Network dmz (10.10.0.0/24)** : nginx `10.10.0.10`, backend `10.10.0.11`.
 - **Network internal (10.10.2.0/24)** : backend `10.10.2.11`, MySQL `10.10.2.12`.
 - Hanya nginx yang di-publish ke host (port host). Backend & MySQL **tidak**
   di-publish → server MySQL tidak terjangkau dari network dmz maupun host
   → segmentasi DMZ yang nyata.
 - **Web server = node tailnet** (Donenfeld, 2017): `tailscaled` berjalan di
-  dalam container nginx (interface `tailscale0`). Red/Blue Team menyerang/
+  dalam container nginx (interface `tailscale0`). **Red Team dan anggota Blue
+  Team lainnya** (selain host) bergabung ke tailnet yang sama, lalu menyerang/
   menganalisis langsung `http://<ip-tailnet-nginx>/ → nginx → flask`, bukan
   lewat port host. Port host tetap ada untuk dev & fallback.
+- **Firewall untuk jalur serangan di dalam container**: karena attacker masuk
+  lewat `tailscale0` (di dalam container), penerapan firewall (iptables) juga
+  dilakukan di dalam container nginx - lihat §4.2 dan §6.5.
 
 ### 3.2 Alur request
 
@@ -197,10 +204,46 @@ if claims.get("role") != "admin":
 
 **Docker Compose** (`docker-compose.yml`, Kane & Matthias, 2018) - 3 service,
 2 network bridge, IP statis, healthcheck, `restart: unless-stopped`. MySQL
-hanya di network internal. Backend memakai `python:3.12-slim`; nginx
-`nginx:1.27-alpine`; database `mysql:8.4`.
+hanya di network internal. Backend memakai `python:3.12-slim`; web server
+di-build dari `nginx/Dockerfile` (nginx + tailscale + wireshark-cli +
+iptables, berbasis `nginx:1.27-alpine`); database `mysql:8.4`.
 
-**Firewall host** (`infrastructure/firewall/firewall.sh`):
+**Tailscale pada web server**: container nginx adalah **node tailnet** -
+`tailscaled` berjalan di dalam container (cap `NET_ADMIN`, device
+`/dev/net/tun`). Attacker dan Blue Team menyerang/menganalisis langsung
+`http://<ip-tailnet-nginx>/`, bukan lewat port host (Donenfeld, 2017). Auth
+key diisi via `TS_AUTHKEY` di `.env`; jika kosong (mode dev), tailscale
+dilewati dan nginx tetap jalan. Detail: `infrastructure/tailscale/setup.md`.
+
+**Firewall (dua lapis)**. Karena jalur serangan utama masuk lewat tailnet ke
+dalam container, penerapan firewall yang paling relevan dilakukan **di dalam
+container nginx** (container adalah Linux kecil berbasis Alpine, iptables
+sudah terpasang). Firewall host bersifat opsional/tambahan.
+
+*Lapis 1 - firewall DI DALAM container web server (utama untuk skenario ini):*
+
+- Web server berjalan sebagai container Linux (Alpine) yang **punya
+  iptables** (`cap_add: NET_ADMIN, NET_RAW` di `docker-compose.yml`).
+  Aturan membatasi interface `tailscale0` tempat attacker masuk:
+  ```bash
+  docker exec nginx sh -c \
+    'iptables -I INPUT 1 -i tailscale0 -s <ip-attacker> -j DROP'   # blokir IP
+  docker exec nginx sh -c \
+    'iptables -I INPUT 1 -i tailscale0 -p tcp --dport 80 -m hashlimit \
+     --hashlimit-above 10/sec --hashlimit-burst 20 --hashlimit-mode srcip \
+     --hashlimit-name http --jump DROP'                            # rate limit
+  ```
+
+  Diuji: aturan `DROP` untuk IP host berhasil memblokir akses (timeout) dan
+  dihapus tanpa sisa (lihat Lampiran). Ini menjawab pertanyaan soal: **tidak
+  perlu mengganti image nginx** - image `nginx:1.27-alpine` sudah merupakan
+  Linux terkecil yang memenuhi (tailscale + tshark + iptables + iproute2).
+- **nginx `limit_req`**: 10 request/detik per IP (burst 20, `nodelay`) -
+  lapis rate-limit di level aplikasi/proxy (lihat `nginx/nginx.conf`).
+
+*Lapis 2 - firewall HOST (opsional, hanya bila host OS Linux/Ubuntu):*
+`infrastructure/firewall/firewall.sh` tetap tersedia untuk membatasi akses
+manajemen host (SSH) dan port host yang di-publish Docker:
 
 - **UFW**: default deny incoming; buka SSH dan port 80/443 hanya dari
   subnet Tailscale `100.64.0.0/10`.
@@ -208,8 +251,9 @@ hanya di network internal. Backend memakai `python:3.12-slim`; nginx
   INPUT): ESTABLISHED diizinkan → subnet Tailscale diizinkan → lainnya
   ditolak → rate limit koneksi NEW **10/detik** (burst 20) per source IP
   via modul `hashlimit`.
-- **nginx `limit_req`**: 10 request/detik per IP (burst 20, `nodelay`) -
-  lapis rate-limit di level aplikasi/proxy.
+
+Pada host Windows (Docker Desktop) skrip host ini dilewati; perlindungan
+tetap utuh lewat Lapis 1 (iptables di dalam container + `limit_req` nginx).
 
 ---
 
@@ -264,8 +308,17 @@ Analisis lalu lintas dilakukan dengan Wireshark/tshark dan filter BPF
 
 ### 6.1 Capture
 
+Karena web server adalah node tailnet, capture dijalankan **di dalam
+container nginx** pada interface `tailscale0` (tempat traffic attacker
+masuk):
+
 ```bash
-sudo tshark -i any -f "tcp port 80" -w red_team.pcap
+# Terminal 1 - mulai capture di dalam container web server
+docker exec -it nginx sh -c \
+  'tshark -i tailscale0 -f "tcp port 80" -w /tmp/red_team.pcap'
+
+# Setelah Fase 2 selesai, Ctrl+C lalu salin PCAP keluar untuk Wireshark:
+docker cp nginx:/tmp/red_team.pcap ./red_team.pcap
 ```
 
 ### 6.2 BPF & isolasi paket mencurigakan
@@ -302,10 +355,16 @@ Recon (GET /api, path enum) ──> register/login (JWT sah, role=user)
 1. **Patch `auth.py`** - verifikasi dengan whitelist algoritma + signature
    wajib (lihat `docs/BLUE_TEAM.md` §5.1).
 2. **Patch `routes.py`** - role dicek ke **database**, bukan klaim token.
-3. **Blokir IP attacker** di firewall:
+3. **Blokir IP attacker** di dalam container nginx (interface `tailscale0`,
+   tempat traffic attacker masuk):
    ```bash
-   sudo iptables -I DOCKER-USER 1 -s 100.101.102.103 -j DROP
+   docker exec nginx sh -c \
+     'iptables -I INPUT 1 -i tailscale0 -s 100.101.102.103 -j DROP'
    ```
+
+   (Untuk vektor port host yang di-publish Docker, blokir di host lewat
+   chain **DOCKER-USER**: `sudo iptables -I DOCKER-USER 1 -s <ip> -j DROP`.
+   Alternatif lain: Tailscale ACL - lihat `docs/BLUE_TEAM.md` §4.)
 4. **Hardening** - lihat `docs/HARDENING.md`: base image, non-root user,
    secret dari environment, WebSocket ber-autentikasi, rate limit.
 
@@ -325,7 +384,12 @@ semua kebutuhan.)*
 **Kesimpulan: bukan selalu yang terkecil, melainkan yang terkecil yang tetap
 deterministik.** Rincian:
 
-- **nginx** → `nginx:1.27-alpine` (kecil & resmi).
+- **nginx (web server)** → `nginx:1.27-alpine` **sudah merupakan image Linux
+  terkecil yang memenuhi semua kebutuhan**: nginx + tailscale + tshark +
+  iptables + iproute2 di dalam satu image (lihat `nginx/Dockerfile`). Dengan
+  begini firewall (iptables) dan forensik (tshark) bisa berjalan **di dalam
+  container yang sama**, tanpa container tambahan dan tanpa mengganti image.
+  Ukuran tetap kecil karena Alpine (~5-10 MB base). Tidak perlu image terpisah.
 - **Backend** → `python:3.12-slim`, bukan alpine: wheel binary
   `cryptography` (dibutuhkan PyMySQL) dan gunicorn lebih andal di glibc
   (Debian/slim); alpine (musl) berisiko gagal/membutuhkan kompiler.
@@ -334,6 +398,9 @@ deterministik.** Rincian:
 
 Trade-off: hemat ±75 MB di backend dengan alpine tidak sebanding dengan
 risiko build tidak deterministik pada project yang harus direproduksi.
+Kesimpulan praktis: `nginx:1.27-alpine` (dengan paket forensik/firewall)
+memenuhi kebutuhan firewall di dalam container Linux terkecil yang
+fungsional; backend memakai `python:3.12-slim` karena deterministik.
 
 ---
 
@@ -344,8 +411,10 @@ risiko build tidak deterministik pada project yang harus direproduksi.
 1. Layanan API/WebSocket (Flask) berhasil dibangun dengan autentikasi JWT
    serta transfer data sinkron dan asinkron di atas Docker microservices
    bertopologi DMZ + IP statis.
-2. Firewall (UFW + iptables DOCKER-USER + nginx `limit_req`) membatasi
-   port dan rate koneksi per detik.
+2. Firewall diterapkan di dalam container web server (iptables pada
+   interface `tailscale0` + nginx `limit_req`) untuk membatasi port dan rate
+   koneksi per detik; skrip host (UFW + DOCKER-USER) opsional untuk host
+   Linux/Ubuntu.
 3. Bypass JWT (alg=none & forge HS256) berhasil dieksekusi secara manual
    tanpa memutus server, membuktikan bahaya *algorithm confusion* dan
    *claim tampering*.
@@ -416,5 +485,24 @@ risiko build tidak deterministik pada project yang harus direproduksi.
 - `docs/HARDENING.md` - base image & checklist hardening.
 - `scripts/bypass_jwt.py` - PoC bypass (reproduksibel).
 - `scripts/smoke_test.sh` - tes end-to-end.
-- `infrastructure/firewall/firewall.sh` - aturan firewall.
+- `infrastructure/firewall/firewall.sh` - aturan firewall host (opsional,
+  hanya untuk host OS Linux/Ubuntu).
 - `infrastructure/tailscale/setup.md` - setup Tailscale.
+
+**Bukti uji firewall di dalam container (terverifikasi 2026-08-15):**
+
+```bash
+# 1) Terapkan aturan DROP untuk IP attacker di interface tailscale0
+docker exec nginx sh -c 'iptables -I INPUT 1 -i tailscale0 -s 100.113.249.79 -j DROP'
+
+# 2) Akses dari IP tersebut -> TIMEOUT (blokir aktif)
+curl -m 6 http://100.112.109.101/api/health   # -> connection timeout
+
+# 3) Hapus aturan -> akses pulih (200 OK)
+docker exec nginx sh -c 'iptables -D INPUT -i tailscale0 -s 100.113.249.79 -j DROP'
+curl http://100.112.109.101/api/health         # -> {"status":"ok"}
+```
+
+Hasil: aturan `iptables` di dalam container nginx berhasil memblokir akses
+dari host/tailnet dan dapat dihapus tanpa sisa - membuktikan bahwa penerapan
+firewall untuk skenario ujian **tidak memerlukan penggantian image nginx**.

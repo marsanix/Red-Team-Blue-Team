@@ -9,24 +9,27 @@ Team), dan mesin analisis (Blue Team) saling terhubung lewat subnet CGNAT
 sendiri yang menjadi node tailnet**. `tailscaled` berjalan di dalam container
 nginx (lihat `nginx/Dockerfile` + `nginx/entrypoint.sh`). Jadi attacker
 menyerang langsung alamat tailnet web server (`100.x.y.z:80`), bukan port
-host. Host cukup menjalankan Docker.
+host. **Host Docker adalah mesin Blue Team** (mis. laptop salah satu anggota)
+- host cukup menjalankan Docker, tidak perlu Ubuntu.
 
 ---
 
 ## 1. Siapkan auth key di `.env`
 
-Isi dua variabel ini di `.env` pada **server Ubuntu**:
+Isi dua variabel ini di `.env` pada **host Docker (mesin Blue Team)**:
 
 ```bash
-# .env (server)
-TS_AUTHKEY=tskey-auth-kSGqNHhy2111CNTRL-45LKD4Yo97cqWzwwdUDk7cCY26bq1RtoG
+# .env (server) - nilai auth key DIISI di .env, JANGAN di file ter-track git
+TS_AUTHKEY=tskey-auth-XXXX-YYYY        # ganti: isi key asli hanya di .env
 TS_HOSTNAME=uas-nginx
 ```
 
-- Auth key sesuai yang tercantum di `CLAUDE.md`. Jika key sudah terpakai/
-  dicabut, generate ulang di https://login.tailscale.com/admin/settings/keys.
-- Di mesin dev (Windows/Docker Desktop), biarkan `TS_AUTHKEY=` kosong agar
-  auth key tidak terpakai oleh node percobaan (umumnya single-use).
+- Auth key terbaru (2026-08-15) sudah dipakai dan berhasil join saat tes dev.
+  Jika key sudah terpakai/dicabut, generate ulang di
+  https://login.tailscale.com/admin/settings/keys lalu isi `TS_AUTHKEY` di
+  `.env`.
+- **Jangan pernah commit auth key ke repo publik** (setup.md ter-track git).
+  Isi key asli hanya di `.env` (ter-gitignore).
 
 ## 2. Jalankan stack (web server masuk tailnet)
 
@@ -52,11 +55,12 @@ docker exec nginx tailscale status
 
 ## 3. Join mesin RED TEAM (attacker)
 
-Install & join ke **tailnet yang sama** (auth key sama):
+Mesin attacker (di luar host Blue Team) install & join ke **tailnet yang
+sama** (auth key sama):
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up --auth-key=tskey-auth-kSGqNHhy2111CNTRL-45LKD4Yo97cqWzwwdUDk7cCY26bq1RtoG
+sudo tailscale up --auth-key="${TS_AUTHKEY}"   # nilai diambil dari .env (jangan commit)
 ```
 
 Target serangan = **IP tailnet web server** (dari langkah 2), misal
@@ -66,14 +70,18 @@ Target serangan = **IP tailnet web server** (dari langkah 2), misal
 curl -I http://<ip-tailnet-nginx>/api/health
 ```
 
-## 4. Join mesin BLUE TEAM (analisis / pembela)
+## 4. Join mesin BLUE TEAM lainnya (analisis / pembela)
+
+Anggota Blue Team **selain host** (host = yang menjalankan Docker) install &
+join ke tailnet yang sama:
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up --auth-key=tskey-auth-kSGqNHhy2111CNTRL-45LKD4Yo97cqWzwwdUDk7cCY26bq1RtoG
+sudo tailscale up --auth-key="${TS_AUTHKEY}"   # nilai diambil dari .env (jangan commit)
 ```
 
-Blue Team memakai IP tailnet web server ini untuk koneksi tes dan analisis.
+Mereka memakai IP tailnet web server ini untuk koneksi tes dan analisis.
+(Host itu sendiri tidak wajib join - akses/manajemen via `docker exec`.)
 
 ## 5. Capture & pemblokiran untuk Blue Team
 
@@ -100,13 +108,18 @@ docker exec -it nginx sh -c \
 
 Detail lengkap: `docs/BLUE_TEAM.md`.
 
-## 6. Firewall host (tetap ada untuk SSH & port host)
+## 6. Firewall (di dalam container + host opsional)
 
-Firewall host (`infrastructure/firewall/firewall.sh`) tetap berguna untuk
-akses manajemen (SSH) dan membatasi siapa yang boleh memakai port host.
-Namun lalu lintas penyerangan via tailnet masuk **langsung ke container**,
-sehingga untuk vektor itu pembatasan dilakukan di lapis nginx
-(`limit_req` di `nginx.conf`) dan iptables di dalam container (langkah 5).
+**Utama (skenario ini):** lalu lintas penyerangan via tailnet masuk
+**langsung ke container** (interface `tailscale0`), sehingga pembatasan
+dilakukan di dalam container nginx:
+- **iptables di dalam container** (langkah 5) untuk blokir IP attacker.
+- **nginx `limit_req`** (`nginx/nginx.conf`) untuk rate limit 10 r/s.
+
+**Opsional (hanya bila host OS Linux/Ubuntu):** `infrastructure/firewall/
+firewall.sh` untuk membatasi akses manajemen host (SSH) dan port host yang
+di-publish Docker. Pada host Windows (Docker Desktop) skrip ini dilewati;
+perlindungan tetap utuh lewat lapis di dalam container.
 
 ## 7. Verifikasi lintas mesin
 

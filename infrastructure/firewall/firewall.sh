@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 # ============================================================
-# firewall.sh - Aturan firewall server Ubuntu (Fase 1, Administrasi)
+# firewall.sh - Aturan firewall HOST (OPSIONAL, hanya host OS Linux/Ubuntu)
 #
-# DUA LAPIS (defense in depth):
+# KONTEKS SKENARIO UJIAN:
+# Host Docker = mesin Blue Team (bisa Windows/Linux). Jalur serangan utama
+# (Fase 2) masuk lewat tailnet LANGSUNG ke dalam container nginx
+# (interface `tailscale0`), sehingga firewall utama yang relevan diterapkan
+# DI DALAM container:
+#   docker exec nginx sh -c 'iptables -I INPUT 1 -i tailscale0 -s <ip> -j DROP'
+#   + nginx `limit_req` (10 r/s) di nginx/nginx.conf
+# Skrip ini hanya LAPIS TAMBAHAN untuk host yang OS-nya Linux/Ubuntu:
+# melindungi layanan host (SSH) dan membatasi port host yang di-publish
+# Docker. Pada host Windows (Docker Desktop) skrip ini dilewati.
+#
+# DUA LAPIS (defense in depth, khusus host Linux):
 #   Layer A - UFW         : melindungi layanan HOST (SSH, dsb.)
 #   Layer B - iptables    : membatasi lalu lintas ke CONTAINER Docker
 #
@@ -73,7 +84,11 @@ iptables -L DOCKER-USER -n -v --line-numbers
 echo
 echo "[firewall] Verifikasi (di server):"
 echo "  sudo iptables -L DOCKER-USER -n -v -Z    # reset counter lalu lihat counter setelah tes"
-echo "  sudo tshark -i any -f \"tcp port ${HTTP_PORT}\" -w red_team.pcap"
+echo "  sudo tshark -i any -f \"tcp port ${HTTP_PORT}\" -w red_team.pcap   # hanya untuk traffic port host"
+echo
+echo "[firewall] Jalur tailnet (Fase 3) - capture & blokir DI DALAM container:"
+echo "  docker exec -it nginx sh -c 'tshark -i tailscale0 -f \"tcp port 80\" -w /tmp/red_team.pcap'"
+echo "  docker exec nginx sh -c 'iptables -I INPUT 1 -i tailscale0 -s <ip-attacker> -j DROP'"
 echo
 echo "[firewall] Persistensi antar reboot (opsional):"
 echo "  sudo apt install iptables-persistent"
