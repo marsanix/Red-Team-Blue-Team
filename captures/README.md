@@ -14,6 +14,7 @@ docker exec -it nginx sh -c \
 ```
 
 Catatan:
+
 - File `.pcap`/`.pcapng` di-ignore oleh git (`.gitignore`), jadi hasil
   capture tidak ikut ter-commit. Simpan salinan ke tempat aman bila perlu
   dilampirkan ke laporan.
