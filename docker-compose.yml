@@ -1,0 +1,87 @@
+# ============================================================
+# docker-compose - Topologi DMZ microservices (Fase 1)
+#
+#   Network dmz     10.10.0.0/24  : nginx (10.10.0.10), flask (10.10.0.11)
+#   Network internal 10.10.1.0/24 : flask (10.10.1.11), mysql (10.10.1.12)
+#
+#   Hanya nginx yang di-publish ke host (port 80). Flask & MySQL TIDAK
+#   di-publish -> segmentasi DMZ. MySQL hanya bisa diakses dari network
+#   internal, tidak dari network dmz maupun host.
+#
+#   IP statis dikonfigurasi via `ipv4_address` + subnet eksplisit.
+# ============================================================
+name: uas-kelompok5
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"                      # satu-satunya pintu masuk dari luar
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      dmz:
+        ipv4_address: 10.10.0.10
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    container_name: flask
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      dmz:
+        ipv4_address: 10.10.0.11
+      internal:
+        ipv4_address: 10.10.1.11
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  mysql:
+    image: mysql:8.4
+    container_name: mysql
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      internal:
+        ipv4_address: 10.10.1.12
+    healthcheck:
+      # `$$` agar compose TIDAK mengekspansi $MYSQL_ROOT_PASSWORD (container yang mengganti).
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+networks:
+  dmz:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24
+  internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.1.0/24
+
+volumes:
+  db_data:
