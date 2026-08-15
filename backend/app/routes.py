@@ -87,7 +87,8 @@ def login():
 
     now = _dt.datetime.now(_dt.timezone.utc)
     payload = {
-        "sub": user.id,
+        # PyJWT mensyaratkan klaim "sub" bertipe string.
+        "sub": str(user.id),
         "username": user.username,
         "role": user.role,
         "iat": int(now.timestamp()),
@@ -107,7 +108,10 @@ def login():
 def profile():
     """Profil pengguna yang sedang login (butuh JWT valid)."""
     claims = _require_token()
-    user = db.session.get(User, claims.get("sub"))
+    try:
+        user = db.session.get(User, int(claims.get("sub")))
+    except (TypeError, ValueError):
+        user = None
     if not user:
         abort(401, "User tidak ditemukan")
     return jsonify({"profile": user.to_dict()})

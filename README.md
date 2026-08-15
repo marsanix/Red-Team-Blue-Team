@@ -1,4 +1,4 @@
-# UAS — Network Programming & Administration (Kelompok 5)
+# UAS - Network Programming & Administration (Kelompok 5)
 
 Layanan API/WebSocket (Python Flask) di-deploy sebagai microservices Docker
 ber-topologi **DMZ** dengan IP statis, dilengkapi kerentanan **JWT bypass**
@@ -38,9 +38,9 @@ TAILNET 100.64.0.0/10
   Red/Blue Team --> host:80
                      nginx 10.10.0.10 (dmz)   <- satu-satunya yang di-publish
                        | proxy_pass
-                     flask 10.10.0.11 (dmz) / 10.10.1.11 (internal)
+                     flask 10.10.0.11 (dmz) / 10.10.2.11 (internal)
                        | SQL
-                     mysql 10.10.1.12 (internal, TIDAK di-publish)
+                     mysql 10.10.2.12 (internal, TIDAK di-publish)
 ```
 
 ## Quickstart (Docker Desktop Windows / server Ubuntu)
@@ -65,6 +65,16 @@ docker compose ps             # pastikan semua "healthy"
 | GET | `/api/jobs/<id>` | Status job |
 | WS | `/ws/notifications` | WebSocket notifikasi |
 
+## Troubleshooting
+
+- **Port 80 sudah dipakai project lain / Windows** (`Bind for 0.0.0.0:80 failed`):
+  tambahkan `HTTP_PORT=8080` di `.env` lalu `docker compose up -d`. Di server
+  Ubuntu port 80 default dipakai (tailscale mengarah ke port 80).
+- **Ubah subnet 10.10.0.0/24 / 10.10.2.0/24** bila bentrok dengan network
+  Docker lain di mesin (terjadi jika ada project lain memakai range yang sama).
+- **Reset database**: `docker compose down -v && docker compose up -d` (volume
+  `db_data` dihapus, `init.sql` dijalankan ulang).
+
 ## Tes cepat
 
 ```bash
@@ -87,7 +97,7 @@ tersedia untuk `smoke_test.sh`.
 
 ## Membuat laporan PDF
 
-1. Ekspor `docs/LAPORAN.md` ke PDF — mis. dengan VS Code + ekstensi
+1. Ekspor `docs/LAPORAN.md` ke PDF - mis. dengan VS Code + ekstensi
    *Markdown PDF*, atau *Pandoc*:
    ```bash
    pandoc docs/LAPORAN.md -o KODEMK_NAMA_NIM.pdf --pdf-engine=weasyprint
@@ -97,5 +107,5 @@ tersedia untuk `smoke_test.sh`.
 
 > **Catatan akademik:** pahami & parafrasekan seluruh kode/laporan sesuai
 > kemampuannya sendiri; jangan copy-paste buta. Project ini adalah alat
-> edukasi keamanan untuk lab ujian — jangan dipakai menyerang sistem selain
+> edukasi keamanan untuk lab ujian, jangan dipakai menyerang sistem selain
 > target ujian.

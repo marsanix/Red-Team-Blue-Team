@@ -7,7 +7,7 @@
 #   Layer B - iptables    : membatasi lalu lintas ke CONTAINER Docker
 #
 # PENTING (dijelaskan juga di docs/BLUE_TEAM.md):
-# Port 80/443 yang di-publish Docker TIDAK lewat chain INPUT UFW — paketnya
+# Port 80/443 yang di-publish Docker TIDAK lewat chain INPUT UFW - paketnya
 # di-DNAT di PREROUTING lalu di-FORWARD ke container. Karena itu semua
 # filtering traffic container ditaruh di chain khusus **DOCKER-USER**
 # (disediakan Docker, tidak ditimpa saat Docker restart).

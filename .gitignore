@@ -1,2 +1,21 @@
+# Konfigurasi lokal & rahasia
+.env
 .claude
 CLAUDE.md
+
+# Artefak Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Capture paket (buat Fase 3)
+*.pcap
+*.pcapng
+
+# Log & sementara
+*.log
+.DS_Store
+Thumbs.db

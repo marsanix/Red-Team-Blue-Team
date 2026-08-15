@@ -47,10 +47,32 @@ echo "Menunggu job selesai..."
 sleep 6
 curl -s "${BASE}/api/jobs/${JOB_ID}" | python -m json.tool
 
-echo "== 9. Rate limit nginx (30 request cepat) =="
-for i in $(seq 1 30); do
-  CODE=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/api/health")
-  printf "%s " "${CODE}"
-done
-echo
-echo "Selesai. (muncul 503 menandakan limit_req nginx bekerja)"
+echo "== 9. Rate limit nginx (40 request konkuren) =="
+python - "${BASE}" <<'PY'
+import concurrent.futures
+import sys
+import urllib.error
+import urllib.request
+from collections import Counter
+
+base = sys.argv[1]
+
+def hit(_):
+    try:
+        with urllib.request.urlopen(f"{base}/api/health", timeout=10) as resp:
+            return resp.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:
+        return 0
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+    codes = list(ex.map(hit, range(40)))
+
+print("Distribusi kode HTTP:", dict(Counter(codes)))
+if 503 in codes:
+    print("-> limit_req nginx BEKERJA (muncul 503 untuk request di atas burst).")
+else:
+    print("-> Tidak ada 503 (request mungkin tersebar >1 detik).")
+print("Selesai.")
+PY

@@ -2,7 +2,7 @@
 # docker-compose - Topologi DMZ microservices (Fase 1)
 #
 #   Network dmz     10.10.0.0/24  : nginx (10.10.0.10), flask (10.10.0.11)
-#   Network internal 10.10.1.0/24 : flask (10.10.1.11), mysql (10.10.1.12)
+#   Network internal 10.10.2.0/24 : flask (10.10.2.11), mysql (10.10.2.12)
 #
 #   Hanya nginx yang di-publish ke host (port 80). Flask & MySQL TIDAK
 #   di-publish -> segmentasi DMZ. MySQL hanya bisa diakses dari network
@@ -14,11 +14,22 @@ name: uas-kelompok5
 
 services:
   nginx:
-    image: nginx:1.27-alpine
-    container_name: nginx
+    # Web server = NODE TAILNET. tailscaled berjalan di dalam container
+    # (lihat nginx/Dockerfile + entrypoint.sh). Attacker menyerang langsung
+    # ke alamat tailnet web server (100.x.y.z:80), bukan lewat port host.
+    build: ./nginx
     restart: unless-stopped
     ports:
-      - "80:80"                      # satu-satunya pintu masuk dari luar
+      # Port host untuk akses DEV / fallback. Default 80 (server Ubuntu);
+      # override via HTTP_PORT di .env bila bentrok di mesin dev (mis. 8081).
+      - "${HTTP_PORT:-80}:80"
+    env_file:
+      - .env        # TS_AUTHKEY, TS_HOSTNAME (tailscale) untuk container ini
+    cap_add:
+      - NET_ADMIN   # dibutuhkan tailscaled untuk membuat interface tailscale0
+      - NET_RAW
+    devices:
+      - "/dev/net/tun:/dev/net/tun"   # device tun untuk WireGuard/tailscale
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
@@ -29,15 +40,16 @@ services:
 
   backend:
     build: ./backend
-    container_name: flask
     restart: unless-stopped
     env_file:
       - .env
     networks:
       dmz:
         ipv4_address: 10.10.0.11
+        aliases:
+          - flask          # alias agar "flask" ter-resolve di network dmz
       internal:
-        ipv4_address: 10.10.1.11
+        ipv4_address: 10.10.2.11
     depends_on:
       mysql:
         condition: service_healthy
@@ -50,7 +62,6 @@ services:
 
   mysql:
     image: mysql:8.4
-    container_name: mysql
     restart: unless-stopped
     env_file:
       - .env
@@ -62,7 +73,7 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       internal:
-        ipv4_address: 10.10.1.12
+        ipv4_address: 10.10.2.12
     healthcheck:
       # `$$` agar compose TIDAK mengekspansi $MYSQL_ROOT_PASSWORD (container yang mengganti).
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
@@ -81,7 +92,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 10.10.1.0/24
+        - subnet: 10.10.2.0/24
 
 volumes:
   db_data:

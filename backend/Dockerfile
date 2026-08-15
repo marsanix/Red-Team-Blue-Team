@@ -1,4 +1,4 @@
-# Base image: python:3.12-slim (bukan alpine) — lihat docs/HARDENING.md
+# Base image: python:3.12-slim (bukan alpine) - lihat docs/HARDENING.md
 # untuk analisis keputusan "image terkecil vs determinisme".
 FROM python:3.12-slim
 

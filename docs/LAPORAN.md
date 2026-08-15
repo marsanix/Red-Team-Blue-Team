@@ -1,17 +1,17 @@
-# LAPORAN TEKNIS — Layanan API Web dengan Bypass JWT (Simulasi Red Team & Blue Team)
+## LAPORAN TEKNIS - Layanan API Web dengan Bypass JWT (Simulasi Red Team & Blue Team)
 
-**Mata Kuliah** : Network Programming & Administration  
-**Kelas** : IFN41 | **Prodi** : Informatika PJJ S1  
-**Dosen** : Abdul Azzam Ajhari, S.Kom., M.Kom.  
-**Kelompok** : 5  
+**Mata Kuliah** : Network Programming & Administration
+**Kelas** : IFN41 | **Prodi** : Informatika PJJ S1
+**Dosen** : Abdul Azzam Ajhari, S.Kom., M.Kom.
+**Kelompok** : 5
 **Anggota** :
 
-| No | Nama | NIM |
-|----|------|-----|
-| 1 | Marsani | 230401010282 |
-| 2 | Muhammad Saifulloh | 220401010207 |
-| 3 | Kristian Hananiel Hura | 220401010289 |
-| 4 | Sukandar | 240401020175 |
+| No | Nama                   | NIM          |
+| -- | ---------------------- | ------------ |
+| 1  | Marsani                | 230401010282 |
+| 2  | Muhammad Saifulloh     | 220401010207 |
+| 3  | Kristian Hananiel Hura | 220401010289 |
+| 4  | Sukandar               | 240401020175 |
 
 > **Nama file PDF sesuai petunjuk:** `KODEMK_NAMA_NIM.pdf` (diisi per anggota).
 > Laporan ini disusun sebagai materi utama; setiap anggota wajib memahami dan
@@ -63,22 +63,25 @@ dapat membukanya setelah memanipulasi token.
 
 ## 2. Tinjauan Pustaka Ringkas
 
-- **JWT (RFC 7519)**: token berformat `header.payload.signature`, base64url.
-  Header memuat algoritma (`alg`). Kelemahan klasik: aplikasi mempercayai
-  `alg` dari header → serangan **algorithm confusion** (`alg=none`,
-  RSA→HMAC), brute-force secret lemah, dan *claim tampering* (ubah `role`).
+- **JWT (RFC 7519; Jones, Bradley, & Sakimura, 2015)**: token berformat
+  `header.payload.signature`, base64url. Header memuat algoritma (`alg`).
+  Kelemahan klasik: aplikasi mempercayai `alg` dari header → serangan
+  **algorithm confusion** (`alg=none`, RSA→HMAC), brute-force secret lemah,
+  dan *claim tampering* (ubah `role`). Panduan pengamanan tertuang di RFC
+  8725 (Sheffer, Hardt, & Jones, 2020); kasus nyata diteliti oleh McLean
+  (2015) dan Opirskyy & Kunakh (2026).
 - **DMZ (Demilitarized Zone)**: zona jaringan antara internet/eksternal dan
   jaringan internal; hanya service publik (mis. web server) yang diletakkan
-  di DMZ, database di internal.
+  di DMZ, database di internal (Kurose & Ross, 2021).
 - **Docker microservices**: aplikasi dipecah menjadi container kecil
   (nginx, Flask, MySQL) yang saling terhubung lewat network virtual; IP
-  statis membantu topologi yang dapat dipetakan.
+  statis membantu topologi yang dapat dipetakan (Newman, 2021).
 - **Firewall (UFW/iptables)**: UFW adalah frontend iptables. Rate limiting
   koneksi/detik memakai modul `hashlimit`/`recent`. Untuk traffic container,
-  aturan ditempatkan di chain `DOCKER-USER`.
+  aturan ditempatkan di chain `DOCKER-USER` (Rash, 2007).
 - **BPF & Wireshark/tshark**: Berkeley Packet Filter dipakai sebagai
   capture filter (`-f`) untuk menangkap hanya paket yang relevan; display
-  filter untuk menganalisis PCAP.
+  filter untuk menganalisis PCAP (Sanders, 2017).
 
 ---
 
@@ -88,29 +91,33 @@ dapat membukanya setelah memanipulasi token.
 
 ```
                         TAILNET (100.64.0.0/10)  <- WireGuard / CGNAT
-   ┌──────────────┐   ┌──────────────┐   ┌──────────────────────────────┐
-   │  RED TEAM    │   │ BLUE TEAM    │   │        SERVER (Docker)        │
-   │  Burp Suite  │   │ tshark/WShark│   │                              │
-   └──────┬───────┘   └──────┬───────┘   │  ┌────────────────────────┐  │
-          │                  │           │  │ NETWORK dmz 10.10.0.0/24│  │
-          └──────────────────┴──► host   │  │  nginx ─10.10.0.10       │  │
-                                   port 80  │   └──────┬─────────────┘  │
-                                    (Tailscale)│          │ proxy_pass   │
-                                   ┌──────────┼──────────┼────────────┐  │
-                                   │ NETWORK internal 10.10.1.0/24    │  │
-                                   │  flask ─10.10.1.11   mysql 10.10.1.12 │
-                                   └──────────────┬───────────────────┘  │
-                                                  │ (flask juga di dmz)  │
-                                             10.10.0.11 (dmz)
+   ┌──────────────┐   ┌──────────────┐
+   │  RED TEAM    │   │ BLUE TEAM    │
+   │  Burp Suite  │   │ tshark/WShark│
+   └──────┬───────┘   └──────┬───────┘
+          └──────────────────┴──►  IP tailnet web server (tailscale0:80)
+                                    │  (container nginx = NODE TAILNET)
+                                    │
+                    ┌───────────────┴────────────────┐
+                    │         SERVER (Docker)         │
+                    │  NETWORK dmz 10.10.0.0/24       │
+                    │    nginx 10.10.0.10 (+tailscale0)│
+                    │       │ proxy_pass              │
+                    │       └──► flask 10.10.0.11     │
+                    │  NETWORK internal 10.10.2.0/24  │
+                    │    flask 10.10.2.11 ──► mysql 10.10.2.12 │
+                    └────────────────────────────────┘
 ```
 
 - **Network dmz (10.10.0.0/24)** : nginx `10.10.0.10`, backend `10.10.0.11`.
-- **Network internal (10.10.1.0/24)** : backend `10.10.1.11`, MySQL `10.10.1.12`.
-- Hanya nginx yang di-publish ke host (port 80). Backend & MySQL **tidak**
+- **Network internal (10.10.2.0/24)** : backend `10.10.2.11`, MySQL `10.10.2.12`.
+- Hanya nginx yang di-publish ke host (port host). Backend & MySQL **tidak**
   di-publish → server MySQL tidak terjangkau dari network dmz maupun host
   → segmentasi DMZ yang nyata.
-- Host (Ubuntu) terhubung Tailscale; Red/Blue Team mengakses `host:80 →
-  nginx → flask`.
+- **Web server = node tailnet** (Donenfeld, 2017): `tailscaled` berjalan di
+  dalam container nginx (interface `tailscale0`). Red/Blue Team menyerang/
+  menganalisis langsung `http://<ip-tailnet-nginx>/ → nginx → flask`, bukan
+  lewat port host. Port host tetap ada untuk dev & fallback.
 
 ### 3.2 Alur request
 
@@ -131,11 +138,12 @@ Attacker ──Tailscale──> nginx:80 ──proxy_pass──> flask:5000 ─�
 
 ---
 
-## 4. Implementasi — Fase 1 (Network Programming & Administration)
+## 4. Implementasi - Fase 1 (Network Programming & Administration)
 
 ### 4.1 Pemrograman: server API/WebSocket
 
-Backend ditulis **dari awal** memakai Python Flask. Struktur:
+Backend ditulis **dari awal** memakai Python Flask (Grinberg, 2018), dengan
+pola pemrograman jaringan Python (Rhodes & Goerzen, 2017). Struktur:
 
 ```
 backend/app/
@@ -148,24 +156,26 @@ backend/app/
 └── jobs.py        # job queue asinkron (ThreadPoolExecutor)
 ```
 
-**Transfer data sinkron** — REST request/response:
+**Transfer data sinkron** - REST request/response:
 
-| Method | Path | Auth | Fungsi |
-|--------|------|------|--------|
-| POST | `/api/register` | - | Mendaftar (role default `user`) |
-| POST | `/api/login` | - | Login → JWT (HS256) |
-| GET | `/api/profile` | JWT | Profil pengguna |
-| GET | `/api/customers` | JWT + `role=admin` | **Target bypass** |
-| GET | `/api` | - | Index endpoint (misconfiguration) |
-| GET | `/api/health` | - | Health check |
+| Method | Path               | Auth                | Fungsi                            |
+| ------ | ------------------ | ------------------- | --------------------------------- |
+| POST   | `/api/register`  | -                   | Mendaftar (role default`user`)  |
+| POST   | `/api/login`     | -                   | Login → JWT (HS256)              |
+| GET    | `/api/profile`   | JWT                 | Profil pengguna                   |
+| GET    | `/api/customers` | JWT +`role=admin` | **Target bypass**           |
+| GET    | `/api`           | -                   | Index endpoint (misconfiguration) |
+| GET    | `/api/health`    | -                   | Health check                      |
 
 **Transfer data asinkron**:
-- WebSocket `/ws/notifications` (flask-sock) — pesan welcome, echo, dan
+
+- WebSocket `/ws/notifications` (protokol RFC 6455; Fette & Melnikov,
+  2011, diakses via flask-sock) - pesan welcome, echo, dan
   broadcast notifikasi saat job selesai.
 - Job queue `POST /api/jobs` → `202` + `job_id`; `GET /api/jobs/<id>` untuk
   polling hasil. Proses berjalan di `ThreadPoolExecutor`.
 
-**Kerentanan inti (`auth.py`)** — decoder mempercayai `alg` dari header:
+**Kerentanan inti (`auth.py`)** - decoder mempercayai `alg` dari header:
 
 ```python
 alg = header.get("alg")
@@ -175,7 +185,7 @@ if alg == "HS256":
     return jwt.decode(token, Config.WEAK_SECRET, algorithms=["HS256"])
 ```
 
-Dan endpoint `/api/customers` **tidak mengecek ulang role ke database** —
+Dan endpoint `/api/customers` **tidak mengecek ulang role ke database** -
 hanya membaca klaim `role` dari token:
 
 ```python
@@ -185,27 +195,30 @@ if claims.get("role") != "admin":
 
 ### 4.2 Administrasi: deploy Docker + firewall
 
-**Docker Compose** (`docker-compose.yml`) — 3 service, 2 network bridge,
-IP statis, healthcheck, `restart: unless-stopped`. MySQL hanya di network
-internal. Backend memakai `python:3.12-slim`; nginx `nginx:1.27-alpine`;
-database `mysql:8.4`.
+**Docker Compose** (`docker-compose.yml`, Kane & Matthias, 2018) - 3 service,
+2 network bridge, IP statis, healthcheck, `restart: unless-stopped`. MySQL
+hanya di network internal. Backend memakai `python:3.12-slim`; nginx
+`nginx:1.27-alpine`; database `mysql:8.4`.
 
 **Firewall host** (`infrastructure/firewall/firewall.sh`):
+
 - **UFW**: default deny incoming; buka SSH dan port 80/443 hanya dari
   subnet Tailscale `100.64.0.0/10`.
 - **iptables DOCKER-USER** (karena traffic container lewat FORWARD, bukan
   INPUT): ESTABLISHED diizinkan → subnet Tailscale diizinkan → lainnya
   ditolak → rate limit koneksi NEW **10/detik** (burst 20) per source IP
   via modul `hashlimit`.
-- **nginx `limit_req`**: 10 request/detik per IP (burst 20, `nodelay`) —
+- **nginx `limit_req`**: 10 request/detik per IP (burst 20, `nodelay`) -
   lapis rate-limit di level aplikasi/proxy.
 
 ---
 
-## 5. Metodologi Red Team — Fase 2
+## 5. Metodologi Red Team - Fase 2
 
-Alat: **Burp Suite** (Repeater & Intruder). Tidak ada automated scanner;
-semua manipulasi manual, dan server **tidak diputus** koneksinya.
+Alat: **Burp Suite** (Repeater & Intruder), mengikuti metodologi pengujian
+keamanan aplikasi web (Stuttard & Pinto, 2011) dan kerangka OWASP Top 10
+untuk *broken access control* (OWASP Foundation, 2021). Tidak ada automated
+scanner; semua manipulasi manual, dan server **tidak diputus** koneksinya.
 
 ### 5.1 Reconnaissance
 
@@ -234,17 +247,20 @@ Langkah lengkap: `docs/RECON.md`.
 
 ### 5.3 Hasil & bukti
 
-| Vektor | Sebelum (user) | Setelah (bypass) |
-|--------|----------------|------------------|
-| `alg=none` | 403 | **200** |
-| forge HS256 | 403 | **200** |
+| Vektor       | Sebelum (user) | Setelah (bypass) |
+| ------------ | -------------- | ---------------- |
+| `alg=none` | 403            | **200**    |
+| forge HS256  | 403            | **200**    |
 
 Server tetap hidup; tidak ada flooding. Semua request terekam PCAP oleh
 Blue Team. Walkthrough penuh: `docs/RED_TEAM.md`.
 
 ---
 
-## 6. Analisis Blue Team — Fase 3
+## 6. Analisis Blue Team - Fase 3
+
+Analisis lalu lintas dilakukan dengan Wireshark/tshark dan filter BPF
+(Sanders, 2017).
 
 ### 6.1 Capture
 
@@ -254,13 +270,13 @@ sudo tshark -i any -f "tcp port 80" -w red_team.pcap
 
 ### 6.2 BPF & isolasi paket mencurigakan
 
-| Kebutuhan | Filter |
-|-----------|--------|
-| Hanya IP attacker | `-f "tcp port 80 and host 100.101.102.103"` |
-| Hanya POST | `-Y "http.request.method == POST"` |
-| Cari JWT (prefix `eyJ`) | `-Y "frame contains \"eyJ\""` |
-| Akses ke target | `-Y "http.request.uri contains \"customers\""` |
-| Timeline | `-T fields -e frame.time -e ip.src -e http.request.method -e http.request.uri` |
+| Kebutuhan                | Filter                                                                           |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| Hanya IP attacker        | `-f "tcp port 80 and host 100.101.102.103"`                                    |
+| Hanya POST               | `-Y "http.request.method == POST"`                                             |
+| Cari JWT (prefix`eyJ`) | `-Y "frame contains \"eyJ\""`                                                  |
+| Akses ke target          | `-Y "http.request.uri contains \"customers\""`                                 |
+| Timeline                 | `-T fields -e frame.time -e ip.src -e http.request.method -e http.request.uri` |
 
 ### 6.3 Temuan anomali (dari level paket)
 
@@ -283,14 +299,14 @@ Recon (GET /api, path enum) ──> register/login (JWT sah, role=user)
 
 ### 6.5 Remediasi (menutup celah)
 
-1. **Patch `auth.py`** — verifikasi dengan whitelist algoritma + signature
+1. **Patch `auth.py`** - verifikasi dengan whitelist algoritma + signature
    wajib (lihat `docs/BLUE_TEAM.md` §5.1).
-2. **Patch `routes.py`** — role dicek ke **database**, bukan klaim token.
+2. **Patch `routes.py`** - role dicek ke **database**, bukan klaim token.
 3. **Blokir IP attacker** di firewall:
    ```bash
    sudo iptables -I DOCKER-USER 1 -s 100.101.102.103 -j DROP
    ```
-4. **Hardening** — lihat `docs/HARDENING.md`: base image, non-root user,
+4. **Hardening** - lihat `docs/HARDENING.md`: base image, non-root user,
    secret dari environment, WebSocket ber-autentikasi, rate limit.
 
 ### 6.6 Verifikasi perbaikan
@@ -306,7 +322,7 @@ Recon (GET /api, path enum) ──> register/login (JWT sah, role=user)
 *(Soal meminta saran image container Linux paling kecil yang tetap memenuhi
 semua kebutuhan.)*
 
-**Kesimpulan: bukan selalu yang terkecil — yang terkecil yang tetap
+**Kesimpulan: bukan selalu yang terkecil, melainkan yang terkecil yang tetap
 deterministik.** Rincian:
 
 - **nginx** → `nginx:1.27-alpine` (kecil & resmi).
@@ -324,6 +340,7 @@ risiko build tidak deterministik pada project yang harus direproduksi.
 ## 8. Kesimpulan & Saran
 
 **Kesimpulan.**
+
 1. Layanan API/WebSocket (Flask) berhasil dibangun dengan autentikasi JWT
    serta transfer data sinkron dan asinkron di atas Docker microservices
    bertopologi DMZ + IP statis.
@@ -336,6 +353,7 @@ risiko build tidak deterministik pada project yang harus direproduksi.
    vektor serangan dari level paket, lalu ditutup lewat patch kode & firewall.
 
 **Saran.**
+
 - Gunakan secret acak dari environment, whitelist algoritma JWT, dan selalu
   validasi role ke database.
 - Terapkan rate limit di lebih dari satu lapis (transport + aplikasi).
@@ -343,13 +361,60 @@ risiko build tidak deterministik pada project yang harus direproduksi.
 
 ---
 
+## Daftar Pustaka
+
+1. Donenfeld, J. A. (2017). WireGuard: Next generation kernel network
+   tunnel. Dalam *Proceedings of the 24th Annual Network and Distributed
+   System Security Symposium (NDSS 2017)*. The Internet Society.
+   https://www.ndss-symposium.org/ndss2017/ndss-2017-programme/wireguard-next-generation-kernel-network-tunnel/
+2. Fette, I., & Melnikov, A. (2011). *The WebSocket protocol* (RFC 6455).
+   Internet Engineering Task Force. https://www.rfc-editor.org/rfc/rfc6455
+3. Grinberg, M. (2018). *Flask web development: Developing web applications
+   with Python* (2nd ed.). O'Reilly Media.
+4. Jones, M., Bradley, J., & Sakimura, N. (2015). *JSON Web Signature (JWS)*
+   (RFC 7515). Internet Engineering Task Force.
+   https://www.rfc-editor.org/rfc/rfc7515
+5. Jones, M., Bradley, J., & Sakimura, N. (2015). *JSON Web Token (JWT)*
+   (RFC 7519). Internet Engineering Task Force.
+   https://www.rfc-editor.org/rfc/rfc7519
+6. Kane, S. P., & Matthias, K. (2018). *Docker: Up & running: Shipping
+   reliable containers in production* (2nd ed.). O'Reilly Media.
+7. Kurose, J. F., & Ross, K. W. (2021). *Computer networking: A top-down
+   approach* (8th ed.). Pearson.
+8. McLean, T. (2015). *Critical vulnerabilities in JSON Web Token libraries*.
+   Auth0.
+   https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
+9. Newman, S. (2021). *Building microservices: Designing fine-grained
+   systems* (2nd ed.). O'Reilly Media.
+10. Opirskyy, I. R., & Kunakh, I. A. (2026). Analysis and mitigation of JWT
+    and OAuth 2.0 vulnerabilities in REST APIs. *Radio Electronics, Computer
+    Science, Control*. https://doi.org/10.30837/rt.2026.2.225.05
+11. OWASP Foundation. (2021). *OWASP Top 10:2021 - A01:2021 Broken access
+    control*. https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+12. OWASP Foundation. (n.d.). *JSON Web Token (JWT) cheat sheet*. OWASP Cheat
+    Sheet Series.
+    https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html
+13. Rash, M. (2007). *Linux firewalls: Attack detection and response with
+    iptables, psad, and fwsnort*. No Starch Press.
+14. Rhodes, B., & Goerzen, J. (2017). *Foundations of Python network
+    programming* (3rd ed.). Apress.
+15. Sanders, C. (2017). *Practical packet analysis: Using Wireshark to solve
+    real-world network problems* (3rd ed.). No Starch Press.
+16. Sheffer, Y., Hardt, D., & Jones, M. B. (2020). *JSON Web Token best
+    current practices* (RFC 8725). Internet Engineering Task Force.
+    https://www.rfc-editor.org/rfc/rfc8725
+17. Stuttard, D., & Pinto, M. (2011). *The web application hacker's handbook:
+    Finding and exploiting security flaws* (2nd ed.). Wiley.
+
+---
+
 ## Lampiran
 
-- `docs/RECON.md` — langkah recon (list endpoint).
-- `docs/RED_TEAM.md` — walkthrough serangan Burp Suite.
-- `docs/BLUE_TEAM.md` — analisis tshark/BPF & patch.
-- `docs/HARDENING.md` — base image & checklist hardening.
-- `scripts/bypass_jwt.py` — PoC bypass (reproduksibel).
-- `scripts/smoke_test.sh` — tes end-to-end.
-- `infrastructure/firewall/firewall.sh` — aturan firewall.
-- `infrastructure/tailscale/setup.md` — setup Tailscale.
+- `docs/RECON.md` - langkah recon (list endpoint).
+- `docs/RED_TEAM.md` - walkthrough serangan Burp Suite.
+- `docs/BLUE_TEAM.md` - analisis tshark/BPF & patch.
+- `docs/HARDENING.md` - base image & checklist hardening.
+- `scripts/bypass_jwt.py` - PoC bypass (reproduksibel).
+- `scripts/smoke_test.sh` - tes end-to-end.
+- `infrastructure/firewall/firewall.sh` - aturan firewall.
+- `infrastructure/tailscale/setup.md` - setup Tailscale.

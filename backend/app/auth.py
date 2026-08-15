@@ -1,4 +1,4 @@
-"""Modul autentikasi JWT — INI ADALAH INTI KERENTANAN APLIKASI.
+"""Modul autentikasi JWT - INI ADALAH INTI KERENTANAN APLIKASI.
 
 Pendekatan yang benar (Fase 3 / patch):
   jwt.decode(token, SECRET, algorithms=["HS256"])
@@ -11,7 +11,7 @@ Pendekatan RENTAN (Fase 1, sengaja):
     - alg="HS256" -> diverifikasi memakai WEAK_SECRET yang lemah & hardcoded.
   (Antipattern nyata di dunia nyata, mis. kelas CVE "JWT algorithm confusion".
    PyJWT 2.x sendiri sudah menolak alg=none, karena itu verifikasi `none`
-   ditulis manual di bawah — sesuai cara aplikasi lama yang rentan bekerja.)
+   ditulis manual di bawah - sesuai cara aplikasi lama yang rentan bekerja.)
 """
 import base64
 import hashlib
