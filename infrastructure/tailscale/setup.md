@@ -90,13 +90,14 @@ container** (bukan host), capture dan pemblokiran dilakukan di dalam
 container nginx:
 
 ```bash
-# Capture PCAP pada interface tailscale0 (di dalam container web server)
+# Capture PCAP pada interface tailscale0 (di dalam container web server).
+# `/captures` di-bind-mount ke `./captures` di host -> file langsung ada di
+# host tanpa docker cp.
 docker exec -it nginx sh -c \
-  'tshark -i tailscale0 -f "tcp port 80" -w /tmp/red_team.pcap'
+  'tshark -i tailscale0 -f "tcp port 80" -w /captures/red_team.pcap'
 # (di terminal lain) biarkan menangkap selama Fase 2, lalu Ctrl+C.
 
-# Salin PCAP keluar untuk analisis Wireshark
-docker cp nginx:/tmp/red_team.pcap ./red_team.pcap
+# PCAP sudah tersedia di host: ./captures/red_team.pcap (buka di Wireshark).
 ```
 
 Pemblokiran IP attacker (di dalam container, interface tailscale0):

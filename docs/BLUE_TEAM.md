@@ -20,17 +20,70 @@ pada interface `tailscale0`. tshark sudah terpasang di image nginx
 (`wireshark-cli`).
 
 ```bash
-# Terminal 1 - mulai capture di dalam container web server
-docker exec -it nginx sh -c 'tshark -i tailscale0 -f "tcp port 80" -w /tmp/red_team.pcap'
+# Terminal 1 - mulai capture di dalam container web server.
+# `./captures` di host di-bind-mount ke `/captures` di container, jadi file
+# PCAP langsung tersedia di host TANPA docker cp.
+docker exec -it nginx sh -c 'tshark -i tailscale0 -f "tcp port 80" -w /captures/red_team.pcap'
 
 # (Red Team menyerang di terminal lain; capture terus berjalan)
-# Setelah Fase 2 selesai, hentikan (Ctrl+C), lalu salin PCAP keluar:
-docker cp nginx:/tmp/red_team.pcap ./red_team.pcap
+# Setelah Fase 2 selesai, hentikan (Ctrl+C). File sudah ada di host:
+#   ./captures/red_team.pcap   -> buka langsung dengan Wireshark.
 ```
 
 - `-f` = **capture filter** (BPF), diterapkan saat menangkap, hemat ruang.
-- `-w` = simpan ke file PCAP (di dalam container).
-- **Alternatif GUI**: `docker cp` PCAP ke host lalu buka dengan Wireshark.
+- `-w` = simpan ke file PCAP. Karena `/captures` adalah bind mount ke
+  `./captures` di host, hasil langsung terlihat di folder project (tidak
+  perlu `docker cp`). Fallback tanpa bind mount: `/tmp/red_team.pcap` lalu
+  `docker cp nginx:/tmp/red_team.pcap ./red_team.pcap`.
+
+### 1.1 Realtime streaming ke Wireshark HOST (tanpa file)
+
+Tampilkan paket **langsung** di Wireshark host dengan dua cara (keduanya
+teruji). Keduanya memakai `tshark -w -` (stream pcap ke stdout) DI DALAM
+container nginx.
+
+#### Cara A (paling simpel) - pipe stdin ke Wireshark
+
+Wireshark Windows mendukung live-capture dari **stdin** (`-i -`). Jalankan
+**dari cmd.exe** (bukan PowerShell!) karena PowerShell 5.1 mengubah aliran
+byte biner saat pipe native->native (stream pcap rusak / ber-BOM).
+
+```cmd
+:: HOST - jalankan dari Command Prompt (cmd). Wireshark terbuka otomatis.
+docker exec uas-kelompok5dan9-nginx-1 sh -c "tshark -i tailscale0 -w - 'tcp port 80'" | "C:\Program Files\Wireshark\Wireshark.exe" -k -i -
+```
+
+Catatan:
+- **Gunakan `tshark`, bukan `tcpdump`** (tcpdump TIDAK terpasang di image).
+- Filter capture ditulis sebagai argumen terakhir (mis. `'tcp port 80'`).
+- Uji cepat dari localhost (mode dev): ganti `tailscale0` -> `lo` dan arahkan
+  request ke `127.0.0.1` di dalam container.
+- Ctrl+C pada cmd menghentikan seluruh alur.
+
+#### Cara B - named pipe (opsional)
+
+Skrip `infrastructure/blue_team/live_capture.ps1` (dijalankan di HOST)
+membuat named pipe `\\.\pipe\uas_capture`, **membuka Wireshark otomatis**
+pada pipe tersebut, lalu menyalurkan output tshark dari container ke pipe.
+Berguna bila ingin Wireshark tetap terbuka secara independen dari proses
+streaming.
+
+```powershell
+# HOST - Wireshark terbuka sendiri & streaming langsung:
+powershell -ExecutionPolicy Bypass -File .\infrastructure\blue_team\live_capture.ps1
+#   -Interface tailscale0   -> jalur serangan Fase 2 (default)
+#   -Interface lo / eth0    -> uji cepat dari localhost (mode dev)
+#   -Filter "tcp port 80"   -> capture filter BPF (default)
+#   -NoLaunch               -> jangan buka Wireshark otomatis (buka manual)
+#   -WiresharkArgs "-a duration:10"  -> uji cepat, berhenti otomatis 10 dtk
+```
+
+Bila memilih `-NoLaunch`, buka Wireshark manual pada pipe:
+`Capture -> Options -> Manage Interfaces -> "+" -> "Named pipe" -> \\.\pipe\uas_capture`  (atau CLI: `Wireshark.exe -i \\.\pipe\uas_capture -k`).
+
+Saat Wireshark ditutup, streamer otomatis menghentikan tshark di container.
+Tetap jalankan capture ke file (`/captures`) untuk bukti forensik yang
+permanen; realtime streaming hanya untuk observasi langsung.
 
 ---
 
@@ -41,7 +94,7 @@ docker cp nginx:/tmp/red_team.pcap ./red_team.pcap
 ```bash
 # Semua HTTP dari host attacker tertentu (di dalam container nginx)
 docker exec -it nginx sh -c \
-  'tshark -i tailscale0 -f "tcp port 80 and host 100.101.102.103" -w attacker.pcap'
+  'tshark -i tailscale0 -f "tcp port 80 and host 100.101.102.103" -w /captures/attacker.pcap'
 
 # Hanya koneksi baru (SYN) - melihat upaya brute-force/scan
 docker exec -it nginx sh -c \
@@ -197,7 +250,7 @@ def customers_secure():
 
 ## 6. Checklist analisis (untuk laporan)
 
-- [ ] PCAP tersimpan lengkap selama durasi Fase 2 (`tshark -w /tmp/red_team.pcap` di dalam container nginx) & di-`docker cp` keluar.
+- [ ] PCAP tersimpan lengkap selama durasi Fase 2 (`tshark -w /captures/red_team.pcap` di dalam container nginx) - langsung tersedia di `./captures/` host via bind mount.
 - [ ] BPF dipakai untuk memfilter `host attacker`, `tcp port 80`, `POST`.
 - [ ] Token JWT anomali di-decode → ditemukan `alg:none` + `role=admin`.
 - [ ] Timeline serangan disusun dari `frame.time` & `http.request.uri`.

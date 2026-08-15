@@ -110,9 +110,10 @@ tersedia untuk `smoke_test.sh`.
 2. **Fase 2 (Red Team)**: ikuti `docs/RECON.md` → `docs/RED_TEAM.md`
    (Burp Suite Repeater/Intruder; tanpa automated scanner).
 3. **Fase 3 (Blue Team)**: mulai capture **di dalam container nginx**
-   (`docker exec -it nginx sh -c 'tshark -i tailscale0 -f "tcp port 80" -w /tmp/red_team.pcap'`)
-   sebelum serangan, analisis BPF (`docs/BLUE_TEAM.md`), blokir IP, lalu
-   patch kode.
+   (`docker exec -it nginx sh -c 'tshark -i tailscale0 -f "tcp port 80" -w /captures/red_team.pcap'`)
+   sebelum serangan - PCAP langsung jatuh ke `./captures/` di host via bind
+   mount (tanpa `docker cp`); analisis BPF (`docs/BLUE_TEAM.md`), blokir IP,
+   lalu patch kode.
 
 ## Membuat laporan PDF
 

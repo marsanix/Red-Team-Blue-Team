@@ -87,7 +87,8 @@ echo "  sudo iptables -L DOCKER-USER -n -v -Z    # reset counter lalu lihat coun
 echo "  sudo tshark -i any -f \"tcp port ${HTTP_PORT}\" -w red_team.pcap   # hanya untuk traffic port host"
 echo
 echo "[firewall] Jalur tailnet (Fase 3) - capture & blokir DI DALAM container:"
-echo "  docker exec -it nginx sh -c 'tshark -i tailscale0 -f \"tcp port 80\" -w /tmp/red_team.pcap'"
+echo "  docker exec -it nginx sh -c 'tshark -i tailscale0 -f \"tcp port 80\" -w /captures/red_team.pcap'"
+echo "  # PCAP hasil capture langsung di host: ./captures/red_team.pcap (bind mount)"
 echo "  docker exec nginx sh -c 'iptables -I INPUT 1 -i tailscale0 -s <ip-attacker> -j DROP'"
 echo
 echo "[firewall] Persistensi antar reboot (opsional):"

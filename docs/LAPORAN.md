@@ -225,6 +225,7 @@ sudah terpasang). Firewall host bersifat opsional/tambahan.
 - Web server berjalan sebagai container Linux (Alpine) yang **punya
   iptables** (`cap_add: NET_ADMIN, NET_RAW` di `docker-compose.yml`).
   Aturan membatasi interface `tailscale0` tempat attacker masuk:
+
   ```bash
   docker exec nginx sh -c \
     'iptables -I INPUT 1 -i tailscale0 -s <ip-attacker> -j DROP'   # blokir IP
@@ -313,13 +314,28 @@ container nginx** pada interface `tailscale0` (tempat traffic attacker
 masuk):
 
 ```bash
-# Terminal 1 - mulai capture di dalam container web server
+# Terminal 1 - mulai capture di dalam container web server.
+# `/captures` di container di-bind-mount ke `./captures` di host, sehingga
+# PCAP langsung tersedia di host tanpa docker cp.
 docker exec -it nginx sh -c \
-  'tshark -i tailscale0 -f "tcp port 80" -w /tmp/red_team.pcap'
+  'tshark -i tailscale0 -f "tcp port 80" -w /captures/red_team.pcap'
 
-# Setelah Fase 2 selesai, Ctrl+C lalu salin PCAP keluar untuk Wireshark:
-docker cp nginx:/tmp/red_team.pcap ./red_team.pcap
+# Setelah Fase 2 selesai, Ctrl+C. File ada di host:
+#   ./captures/red_team.pcap  -> buka dengan Wireshark.
 ```
+
+Selain capture ke file, hasil dapat ditampilkan **realtime** di Wireshark
+host. Cara paling simpel: pipe stdin langsung ke Wireshark (`-i -`, jalankan
+dari **cmd.exe** agar byte stream tidak rusak oleh PowerShell), memakai
+`tshark` di dalam container:
+
+```cmd
+docker exec uas-kelompok5dan9-nginx-1 sh -c "tshark -i tailscale0 -w - 'tcp port 80'" | "C:\Program Files\Wireshark\Wireshark.exe" -k -i -
+```
+
+Alternatif: named pipe via `infrastructure/blue_team/live_capture.ps1`
+(membuat `\\.\pipe\uas_capture`, Wireshark host membuka pipe tersebut).
+Stream dihentikan otomatis saat Wireshark ditutup.
 
 ### 6.2 BPF & isolasi paket mencurigakan
 
@@ -357,6 +373,7 @@ Recon (GET /api, path enum) ──> register/login (JWT sah, role=user)
 2. **Patch `routes.py`** - role dicek ke **database**, bukan klaim token.
 3. **Blokir IP attacker** di dalam container nginx (interface `tailscale0`,
    tempat traffic attacker masuk):
+
    ```bash
    docker exec nginx sh -c \
      'iptables -I INPUT 1 -i tailscale0 -s 100.101.102.103 -j DROP'
