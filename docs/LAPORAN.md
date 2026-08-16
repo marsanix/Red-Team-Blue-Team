@@ -3,15 +3,17 @@
 **Mata Kuliah** : Network Programming & Administration
 **Kelas** : IFN41 | **Prodi** : Informatika PJJ S1
 **Dosen** : Abdul Azzam Ajhari, S.Kom., M.Kom.
-**Kelompok** : 5
+**Kelompok** : 5 dan 9
 **Anggota** :
 
-| No | Nama                   | NIM          |
-| -- | ---------------------- | ------------ |
-| 1  | Marsani                | 230401010282 |
-| 2  | Muhammad Saifulloh     | 220401010207 |
-| 3  | Kristian Hananiel Hura | 220401010289 |
-| 4  | Sukandar               | 240401020175 |
+| No | Nama                      | NIM          | KELOMPOK |
+| -- | ------------------------- | ------------ | ---------|
+| 1  | Marsani                   | 230401010282 | 5        |
+| 2  | Muhammad Saifulloh        | 220401010207 | 5        |
+| 3  | Kristian Hananiel Hura    | 220401010289 | 5        |
+| 4  | Sukandar                  | 240401020175 | 5        |
+| 5  | Mafasyafa Annisa Zukhruff | 230401010036 | 9        |
+| 6  | Zelda Elisa Hijry         | 230401010046 | 9        |
 
 > **Nama file PDF sesuai petunjuk:** `KODEMK_NAMA_NIM.pdf` (diisi per anggota).
 > Laporan ini disusun sebagai materi utama; setiap anggota wajib memahami dan
