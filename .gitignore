@@ -20,4 +20,9 @@ venv/
 .DS_Store
 Thumbs.db
 
-Layanan API Web dengan Bypass JWT - Presentasi UAS.pptx
+*.pptx
+*.mp4
+*.docx
+*.pdf
+videos/
+videos/*
